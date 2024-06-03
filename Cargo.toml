@@ -1,6 +1,6 @@
 [package]
 name = "fapi-diff"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["fgardt <me@fgardt.dev>"]
 edition = "2021"
 
@@ -12,8 +12,8 @@ lto = "thin"
 unsafe_code = "forbid"
 
 [lints.clippy]
-nursery = "warn"
-pedantic = "warn"
+nursery = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
 unwrap_used = "warn"
 expect_used = "warn"
 
@@ -34,4 +34,4 @@ reqwest = { version = "0.12", features = [
 ], default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-structdiff = { version = "0.6", features = ["serde", "rustc_hash"] }
+structdiff = { version = "0.7", features = ["serde", "rustc_hash"] }

@@ -117,9 +117,14 @@ pub struct PrototypeDocDiff {
 }
 
 impl PrototypeDoc {
+    pub fn fetch(version: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let data = crate::Docs::Prototypes.get(version)?;
+        Ok(serde_json::from_slice(&data)?)
+    }
+
     pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let mut bytes = Vec::new();
-        std::fs::File::open(path).unwrap().read_to_end(&mut bytes)?;
+        std::fs::File::open(path)?.read_to_end(&mut bytes)?;
         let doc = serde_json::from_slice(&bytes)?;
         Ok(doc)
     }
@@ -220,7 +225,6 @@ impl StructDiff for NamedCommon {
     type DiffRef<'target> = NamedCommonDiff;
 
     fn diff(&self, updated: &Self) -> Vec<Self::Diff> {
-        let cli = crate::CLI.with_borrow(Clone::clone);
         let mut res = Vec::new();
 
         if self.name != updated.name {
@@ -250,11 +254,11 @@ impl StructDiff for NamedCommon {
         res
     }
 
-    fn diff_ref<'target>(&'target self, updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
+    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
         unimplemented!()
     }
 
-    fn apply_single(&mut self, diff: Self::Diff) {
+    fn apply_single(&mut self, _diff: Self::Diff) {
         unimplemented!()
     }
 }
@@ -271,6 +275,9 @@ impl Deref for NamedCommon {
 pub struct Prototype {
     #[serde(flatten)]
     common: NamedCommon,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visibility: Vec<String>,
 
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub parent: String,
@@ -308,6 +315,7 @@ pub enum PrototypeDiff {
     Examples(Vec<String>),
     Images(Vec<Image>),
     // other fields
+    Visibility(Vec<String>),
     Parent(String),
     Abstract(bool),
     Typename(String),
@@ -341,6 +349,10 @@ impl StructDiff for Prototype {
             }
         }
 
+        if self.visibility != updated.visibility {
+            res.push(PrototypeDiff::Visibility(updated.visibility.clone()));
+        }
+
         if self.parent != updated.parent {
             res.push(PrototypeDiff::Parent(updated.parent.clone()));
         }
@@ -371,7 +383,13 @@ impl StructDiff for Prototype {
                 updated
                     .custom_properties
                     .as_ref()
-                    .map(|cp| cp.diff(self.custom_properties.as_ref().unwrap()))
+                    .map(|cp| {
+                        cp.diff(
+                            self.custom_properties
+                                .as_ref()
+                                .unwrap_or(&CustomProperties::default()),
+                        )
+                    })
                     .unwrap_or_default(),
             ));
         }
@@ -379,11 +397,11 @@ impl StructDiff for Prototype {
         res
     }
 
-    fn diff_ref<'target>(&'target self, updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
+    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
         unimplemented!()
     }
 
-    fn apply_single(&mut self, diff: Self::Diff) {
+    fn apply_single(&mut self, _diff: Self::Diff) {
         unimplemented!()
     }
 }
@@ -528,11 +546,11 @@ impl StructDiff for TypeConcept {
         res
     }
 
-    fn diff_ref<'target>(&'target self, updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
+    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
         unimplemented!()
     }
 
-    fn apply_single(&mut self, diff: Self::Diff) {
+    fn apply_single(&mut self, _diff: Self::Diff) {
         unimplemented!()
     }
 }
@@ -644,11 +662,11 @@ impl StructDiff for Property {
         res
     }
 
-    fn diff_ref<'target>(&'target self, updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
+    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
         unimplemented!()
     }
 
-    fn apply_single(&mut self, diff: Self::Diff) {
+    fn apply_single(&mut self, _diff: Self::Diff) {
         unimplemented!()
     }
 }
@@ -668,7 +686,7 @@ pub enum PropertyDefault {
     Literal(Literal),
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Clone, Hash)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Default, Clone, Hash)]
 pub struct CustomProperties {
     #[serde(flatten)]
     common: Common,
@@ -737,11 +755,11 @@ impl StructDiff for CustomProperties {
         res
     }
 
-    fn diff_ref<'target>(&'target self, updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
+    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
         unimplemented!()
     }
 
-    fn apply_single(&mut self, diff: Self::Diff) {
+    fn apply_single(&mut self, _diff: Self::Diff) {
         unimplemented!()
     }
 }
@@ -832,11 +850,11 @@ impl StructDiff for Type {
         res
     }
 
-    fn diff_ref<'target>(&'target self, updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
+    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
         unimplemented!()
     }
 
-    fn apply_single(&mut self, diff: Self::Diff) {
+    fn apply_single(&mut self, _diff: Self::Diff) {
         unimplemented!()
     }
 }
@@ -1161,11 +1179,11 @@ impl StructDiff for ComplexType {
         res
     }
 
-    fn diff_ref<'target>(&'target self, updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
+    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
         unimplemented!()
     }
 
-    fn apply_single(&mut self, diff: Self::Diff) {
+    fn apply_single(&mut self, _diff: Self::Diff) {
         unimplemented!()
     }
 }
@@ -1206,11 +1224,11 @@ impl StructDiff for Literal {
         res
     }
 
-    fn diff_ref<'target>(&'target self, updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
+    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
         unimplemented!()
     }
 
-    fn apply_single(&mut self, diff: Self::Diff) {
+    fn apply_single(&mut self, _diff: Self::Diff) {
         unimplemented!()
     }
 }
