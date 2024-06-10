@@ -803,7 +803,7 @@ impl Default for Type {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum TypeDiff {
     Simple(String),
@@ -948,7 +948,7 @@ impl Default for ComplexType {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ComplexTypeDiff {
     ComplexType(String),
@@ -1056,7 +1056,7 @@ impl StructDiff for ComplexType {
                     for (o, uo) in options.iter().zip(updated_options) {
                         let d = o.diff(uo);
                         if !d.is_empty() {
-                            assert!(diff.len() == 1, "type diff should have only one element");
+                            assert!(d.len() == 1, "type diff should have only one element");
                             diff.push(d[0].clone());
                         }
                     }
