@@ -1,6 +1,6 @@
 [package]
 name = "fapi-diff"
-version = "0.8.0"
+version = "0.8.1"
 authors = ["fgardt <me@fgardt.dev>"]
 edition = "2021"
 description = "A tool to diff 2 versions of Factorios API documentation."

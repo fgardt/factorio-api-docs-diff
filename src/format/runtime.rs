@@ -198,7 +198,7 @@ impl StructDiff for BasicMember {
             }
         }
 
-        if self.lists != updated.lists && (cli.descriptions || cli.full) {
+        if self.lists != updated.lists && cli.full {
             res.push(Self::Diff::Lists(updated.lists.clone()));
         }
 
