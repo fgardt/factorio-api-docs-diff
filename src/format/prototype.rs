@@ -3,7 +3,10 @@ use std::{collections::HashMap, ops::Deref};
 use serde::{de::Visitor, Deserialize, Serialize};
 use structdiff::{Difference, StructDiff};
 
-use super::diff_helper::{self, vec_diff, DiffableVec, DiffableVecDiff, SingleDiff};
+use super::{
+    diff_helper::{self, vec_diff, DiffableVec, DiffableVecDiff, SingleDiff},
+    Image,
+};
 
 impl<T> diff_helper::Named for T
 where
@@ -491,14 +494,6 @@ impl Deref for TypeConcept {
     fn deref(&self) -> &Self::Target {
         &self.common
     }
-}
-
-#[derive(
-    Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Difference, Clone, Default, Hash,
-)]
-pub struct Image {
-    pub filename: String,
-    pub caption: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Hash, Clone, Default)]

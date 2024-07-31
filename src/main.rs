@@ -1,15 +1,15 @@
-#![allow(
-    dead_code,
-//     clippy::upper_case_acronyms,
-//     unused_variables,
-//     clippy::unwrap_used
-)]
+// #![allow(
+// //     dead_code,
+// //     clippy::upper_case_acronyms,
+// //     unused_variables,
+// //     clippy::unwrap_used
+// )]
 
 use std::{cell::RefCell, process::ExitCode};
 
 use anyhow::Result;
 
-use clap::Parser;
+use clap::{crate_authors, crate_description, Parser};
 use format::{runtime::RuntimeDoc, Doc as _};
 
 pub mod format;
@@ -17,9 +17,13 @@ pub mod format;
 use crate::format::prototype::PrototypeDoc;
 
 #[derive(Parser, Clone)]
-#[clap(author, version, about, long_about = None)]
+#[clap(author = crate_authors!(), version, about = crate_description!())]
 pub struct Cli {
-    #[clap(value_parser)]
+    /// Stage of the docs to use.
+    ///
+    /// Prototype stage supports format versions 4 and 5.
+    /// Runtime stage supports format version 5 only.
+    #[clap(value_parser, verbatim_doc_comment)]
     pub stage: Docs,
 
     /// Base version of the docs to use
@@ -95,9 +99,24 @@ impl Docs {
         Ok((*res).into())
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn compare(self, source: &str, target: &str) -> Result<()> {
         let source = self.get(source)?;
         let target = self.get(target)?;
+
+        let source_info = match serde_json::from_slice::<format::Common>(&source) {
+            Ok(s) => s,
+            Err(e) => {
+                anyhow::bail!("Failed to get common info header from source: {e}");
+            }
+        };
+
+        let target_info = match serde_json::from_slice::<format::Common>(&target) {
+            Ok(s) => s,
+            Err(e) => {
+                anyhow::bail!("Failed to get common info header from target: {e}");
+            }
+        };
 
         let (d, s, t): (
             Box<dyn format::Info>,
@@ -105,6 +124,30 @@ impl Docs {
             Box<dyn format::Info>,
         ) = match self {
             Self::Prototype => {
+                if source_info.api_version < 4 {
+                    anyhow::bail!(
+                        "Source api format is too old! Only api version 4 and 5 are supported"
+                    );
+                }
+
+                if target_info.api_version < 4 {
+                    anyhow::bail!(
+                        "Target api format is too old! Only api version 4 and 5 are supported"
+                    );
+                }
+
+                if source_info.api_version > 5 {
+                    anyhow::bail!(
+                        "Source api format is too new! Only api version 4 and 5 are supported"
+                    );
+                }
+
+                if target_info.api_version > 5 {
+                    anyhow::bail!(
+                        "Target api format is too new! Only api version 4 and 5 are supported"
+                    );
+                }
+
                 let source: PrototypeDoc = match serde_json::from_slice(&source) {
                     Ok(s) => s,
                     Err(e) => {
@@ -130,6 +173,22 @@ impl Docs {
                 (Box::new(diff), Box::new(source), Box::new(target))
             }
             Self::Runtime => {
+                if source_info.api_version < 5 {
+                    anyhow::bail!("Source api format is too old! Only api version 5 is supported");
+                }
+
+                if target_info.api_version < 5 {
+                    anyhow::bail!("Target api format is too old! Only api version 5 is supported");
+                }
+
+                if source_info.api_version > 5 {
+                    anyhow::bail!("Source api format is too new! Only api version 5 is supported");
+                }
+
+                if target_info.api_version > 5 {
+                    anyhow::bail!("Target api format is too new! Only api version 5 is supported");
+                }
+
                 let source: RuntimeDoc = match serde_json::from_slice(&source) {
                     Ok(s) => s,
                     Err(e) => {

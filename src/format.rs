@@ -175,3 +175,11 @@ impl Info for Common {
         );
     }
 }
+
+#[derive(
+    Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Difference, Clone, Default, Hash,
+)]
+pub struct Image {
+    pub filename: String,
+    pub caption: Option<String>,
+}

@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use structdiff::StructDiff;
 
 use super::{
-    diff_helper::{self, vec_diff, DiffableVec, DiffableVecDiff, SingleDiff},
+    diff_helper::{vec_diff, DiffableVec, DiffableVecDiff, Named, SingleDiff},
     prototype::LiteralValue,
+    Image,
 };
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
@@ -15,10 +16,9 @@ pub struct RuntimeDoc {
 
     pub classes: DiffableVec<Class>,
     pub events: DiffableVec<Event>,
-    pub defines: DiffableVec<Define>,
-    pub builtin_types: DiffableVec<BuiltinType>,
     pub concepts: DiffableVec<Concept>,
-    pub global_objects: DiffableVec<GlobalObject>,
+    pub defines: DiffableVec<Define>,
+    pub global_objects: DiffableVec<Parameter>,
     pub global_functions: DiffableVec<Method>,
 }
 
@@ -37,9 +37,8 @@ impl super::Doc for RuntimeDoc {
         Self::Diff {
             classes: self.classes.diff(&other.classes),
             events: self.events.diff(&other.events),
-            defines: self.defines.diff(&other.defines),
-            builtin_types: self.builtin_types.diff(&other.builtin_types),
             concepts: self.concepts.diff(&other.concepts),
+            defines: self.defines.diff(&other.defines),
             global_objects: self.global_objects.diff(&other.global_objects),
             global_functions: self.global_functions.diff(&other.global_functions),
         }
@@ -52,9 +51,8 @@ impl super::Info for RuntimeDoc {
 
         eprintln!(" - Classes:          {}", self.classes.len());
         eprintln!(" - Events:           {}", self.events.len());
-        eprintln!(" - Defines:          {}", self.defines.len());
-        eprintln!(" - Builtin Types:    {}", self.builtin_types.len());
         eprintln!(" - Concepts:         {}", self.concepts.len());
+        eprintln!(" - Defines:          {}", self.defines.len());
         eprintln!(" - Global Objects:   {}", self.global_objects.len());
         eprintln!(" - Global Functions: {}", self.global_functions.len());
     }
@@ -64,10 +62,9 @@ impl super::Info for RuntimeDoc {
 pub struct RuntimeDocDiff {
     pub classes: DiffableVecDiff<Class>,
     pub events: DiffableVecDiff<Event>,
-    pub defines: DiffableVecDiff<Define>,
-    pub builtin_types: DiffableVecDiff<BuiltinType>,
     pub concepts: DiffableVecDiff<Concept>,
-    pub global_objects: DiffableVecDiff<GlobalObject>,
+    pub defines: DiffableVecDiff<Define>,
+    pub global_objects: DiffableVecDiff<Parameter>,
     pub global_functions: DiffableVecDiff<Method>,
 }
 
@@ -75,9 +72,8 @@ impl super::Info for RuntimeDocDiff {
     fn print_info(&self) {
         eprintln!("=> {} classes changed", self.classes.len());
         eprintln!("=> {} events changed", self.events.len());
-        eprintln!("=> {} defines changed", self.defines.len());
-        eprintln!("=> {} builtin types changed", self.builtin_types.len());
         eprintln!("=> {} concepts changed", self.concepts.len());
+        eprintln!("=> {} defines changed", self.defines.len());
         eprintln!("=> {} global objects changed", self.global_objects.len());
         eprintln!(
             "=> {} global functions changed",
@@ -89,20 +85,21 @@ impl super::Info for RuntimeDocDiff {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Clone, Default, Hash)]
 pub struct Common {
     pub name: String,
+
+    #[serde(default)] // is actually not optional, 1.1.108 forgot it in one place tho
     pub order: i16, // could be a float
 
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
 }
 
-impl diff_helper::Named for Common {
+pub type DefineValue = Common;
+
+impl Named for Common {
     fn name(&self) -> &str {
         &self.name
     }
 }
-
-pub type BuiltinType = Common;
-pub type BasicMember = Common;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -111,9 +108,6 @@ pub enum CommonDiff {
     Order(i16),
     Description(String),
 }
-
-pub type BuiltinTypeDiff = CommonDiff;
-pub type BasicMemberDiff = CommonDiff;
 
 impl StructDiff for Common {
     type Diff = CommonDiff;
@@ -148,18 +142,21 @@ impl StructDiff for Common {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Clone, Default, Hash)]
-pub struct ExtendedCommon {
+pub struct BasicMember {
     #[serde(flatten)]
     common: Common,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub notes: Vec<String>,
+    pub lists: Vec<String>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub examples: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<Image>,
 }
 
-impl Deref for ExtendedCommon {
+impl Deref for BasicMember {
     type Target = Common;
 
     fn deref(&self) -> &Self::Target {
@@ -169,19 +166,20 @@ impl Deref for ExtendedCommon {
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum ExtendedCommonDiff {
+pub enum BasicMemberDiff {
     // common fields
     Name(String),
     Order(i16),
     Description(String),
-    // extended fields
-    Notes(Vec<String>),
+    // basic member fields
+    Lists(Vec<String>),
     Examples(Vec<String>),
+    Images(Vec<Image>),
 }
 
-impl StructDiff for ExtendedCommon {
-    type Diff = ExtendedCommonDiff;
-    type DiffRef<'target> = ExtendedCommonDiff;
+impl StructDiff for BasicMember {
+    type Diff = BasicMemberDiff;
+    type DiffRef<'target> = BasicMemberDiff;
 
     fn diff(&self, updated: &Self) -> Vec<Self::Diff> {
         let cli = crate::CLI.with_borrow(Clone::clone);
@@ -200,12 +198,16 @@ impl StructDiff for ExtendedCommon {
             }
         }
 
-        if self.notes != updated.notes && (cli.descriptions || cli.full) {
-            res.push(Self::Diff::Notes(updated.notes.clone()));
+        if self.lists != updated.lists && (cli.descriptions || cli.full) {
+            res.push(Self::Diff::Lists(updated.lists.clone()));
         }
 
         if self.examples != updated.examples && (cli.examples || cli.full) {
             res.push(Self::Diff::Examples(updated.examples.clone()));
+        }
+
+        if self.images != updated.images && cli.full {
+            res.push(Self::Diff::Images(updated.images.clone()));
         }
 
         res
@@ -223,29 +225,32 @@ impl StructDiff for ExtendedCommon {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
 pub struct Class {
     #[serde(flatten)]
-    common: ExtendedCommon,
+    common: BasicMember,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visibility: Vec<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+
+    #[serde(rename = "abstract")]
+    pub abstract_: bool,
 
     pub methods: DiffableVec<Method>,
     pub attributes: DiffableVec<Attribute>,
 
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub operators: DiffableVec<Operator>,
-
-    #[serde(rename = "abstract")]
-    pub abstract_: bool,
-
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub base_classes: Vec<String>,
 }
 
-impl diff_helper::Named for Class {
+impl Named for Class {
     fn name(&self) -> &str {
         &self.name
     }
 }
 
 impl Deref for Class {
-    type Target = ExtendedCommon;
+    type Target = BasicMember;
 
     fn deref(&self) -> &Self::Target {
         &self.common
@@ -259,12 +264,14 @@ pub enum ClassDiff {
     Name(String),
     Order(i16),
     Description(String),
-    // extended fields
-    Notes(Vec<String>),
+    // basic member fields
+    Lists(Vec<String>),
     Examples(Vec<String>),
+    Images(Vec<Image>),
     // class fields
+    Visibility(Vec<String>),
+    Parent(Option<String>),
     Abstract(bool),
-    BaseClasses(Vec<String>),
     Methods(DiffableVecDiff<Method>),
     Attributes(DiffableVecDiff<Attribute>),
     Operators(DiffableVecDiff<Operator>),
@@ -282,22 +289,27 @@ impl StructDiff for Class {
 
             for d in common_diff {
                 let d = match d {
-                    ExtendedCommonDiff::Name(name) => Self::Diff::Name(name),
-                    ExtendedCommonDiff::Order(order) => Self::Diff::Order(order),
-                    ExtendedCommonDiff::Description(desc) => Self::Diff::Description(desc),
-                    ExtendedCommonDiff::Examples(examples) => Self::Diff::Examples(examples),
-                    ExtendedCommonDiff::Notes(notes) => Self::Diff::Notes(notes),
+                    BasicMemberDiff::Name(name) => Self::Diff::Name(name),
+                    BasicMemberDiff::Order(order) => Self::Diff::Order(order),
+                    BasicMemberDiff::Description(desc) => Self::Diff::Description(desc),
+                    BasicMemberDiff::Lists(notes) => Self::Diff::Lists(notes),
+                    BasicMemberDiff::Examples(examples) => Self::Diff::Examples(examples),
+                    BasicMemberDiff::Images(images) => Self::Diff::Images(images),
                 };
                 res.push(d);
             }
         }
 
-        if self.abstract_ != updated.abstract_ {
-            res.push(Self::Diff::Abstract(updated.abstract_));
+        if self.visibility != updated.visibility {
+            res.push(Self::Diff::Visibility(updated.visibility.clone()));
         }
 
-        if self.base_classes != updated.base_classes {
-            res.push(Self::Diff::BaseClasses(updated.base_classes.clone()));
+        if self.parent != updated.parent {
+            res.push(Self::Diff::Parent(updated.parent.clone()));
+        }
+
+        if self.abstract_ != updated.abstract_ {
+            res.push(Self::Diff::Abstract(updated.abstract_));
         }
 
         if self.methods != updated.methods {
@@ -348,7 +360,7 @@ pub enum Operator {
 }
 
 impl Deref for Operator {
-    type Target = ExtendedCommon;
+    type Target = BasicMember;
 
     fn deref(&self) -> &Self::Target {
         match self {
@@ -359,7 +371,7 @@ impl Deref for Operator {
     }
 }
 
-impl diff_helper::Named for Operator {
+impl Named for Operator {
     fn name(&self) -> &str {
         &self.name
     }
@@ -420,20 +432,23 @@ impl StructDiff for Operator {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
 pub struct Event {
     #[serde(flatten)]
-    common: ExtendedCommon,
+    common: BasicMember,
 
     pub data: DiffableVec<Parameter>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub filter: Option<String>,
 }
 
 impl Deref for Event {
-    type Target = ExtendedCommon;
+    type Target = BasicMember;
 
     fn deref(&self) -> &Self::Target {
         &self.common
     }
 }
 
-impl diff_helper::Named for Event {
+impl Named for Event {
     fn name(&self) -> &str {
         &self.name
     }
@@ -446,11 +461,13 @@ pub enum EventDiff {
     Name(String),
     Order(i16),
     Description(String),
-    // extended fields
-    Notes(Vec<String>),
+    // basic member fields
+    Lists(Vec<String>),
     Examples(Vec<String>),
+    Images(Vec<Image>),
     // event fields
     Data(DiffableVecDiff<Parameter>),
+    Filter(Option<String>),
 }
 
 impl StructDiff for Event {
@@ -465,11 +482,12 @@ impl StructDiff for Event {
 
             for d in common_diff {
                 let d = match d {
-                    ExtendedCommonDiff::Name(name) => Self::Diff::Name(name),
-                    ExtendedCommonDiff::Order(order) => Self::Diff::Order(order),
-                    ExtendedCommonDiff::Description(desc) => Self::Diff::Description(desc),
-                    ExtendedCommonDiff::Examples(examples) => Self::Diff::Examples(examples),
-                    ExtendedCommonDiff::Notes(notes) => Self::Diff::Notes(notes),
+                    BasicMemberDiff::Name(name) => Self::Diff::Name(name),
+                    BasicMemberDiff::Order(order) => Self::Diff::Order(order),
+                    BasicMemberDiff::Description(desc) => Self::Diff::Description(desc),
+                    BasicMemberDiff::Lists(notes) => Self::Diff::Lists(notes),
+                    BasicMemberDiff::Examples(examples) => Self::Diff::Examples(examples),
+                    BasicMemberDiff::Images(images) => Self::Diff::Images(images),
                 };
                 res.push(d);
             }
@@ -480,6 +498,91 @@ impl StructDiff for Event {
 
             if !diff.is_empty() {
                 res.push(Self::Diff::Data(diff));
+            }
+        }
+
+        if self.filter != updated.filter {
+            res.push(Self::Diff::Filter(updated.filter.clone()));
+        }
+
+        res
+    }
+
+    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
+        unimplemented!()
+    }
+
+    fn apply_single(&mut self, _diff: Self::Diff) {
+        unimplemented!()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
+pub struct Concept {
+    #[serde(flatten)]
+    common: BasicMember,
+
+    #[serde(rename = "type")]
+    pub type_: Type,
+}
+
+impl Deref for Concept {
+    type Target = BasicMember;
+
+    fn deref(&self) -> &Self::Target {
+        &self.common
+    }
+}
+
+impl Named for Concept {
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum ConceptDiff {
+    // common fields
+    Name(String),
+    Order(i16),
+    Description(String),
+    // basic member fields
+    Lists(Vec<String>),
+    Examples(Vec<String>),
+    Images(Vec<Image>),
+    // concept fields
+    Type(TypeDiff),
+}
+
+impl StructDiff for Concept {
+    type Diff = ConceptDiff;
+    type DiffRef<'target> = ConceptDiff;
+
+    fn diff(&self, updated: &Self) -> Vec<Self::Diff> {
+        let mut res = Vec::new();
+
+        if self.common != updated.common {
+            let common_diff = self.common.diff(&updated.common);
+
+            for d in common_diff {
+                let d = match d {
+                    BasicMemberDiff::Name(name) => Self::Diff::Name(name),
+                    BasicMemberDiff::Order(order) => Self::Diff::Order(order),
+                    BasicMemberDiff::Description(desc) => Self::Diff::Description(desc),
+                    BasicMemberDiff::Lists(notes) => Self::Diff::Lists(notes),
+                    BasicMemberDiff::Examples(examples) => Self::Diff::Examples(examples),
+                    BasicMemberDiff::Images(images) => Self::Diff::Images(images),
+                };
+                res.push(d);
+            }
+        }
+
+        if self.type_ != updated.type_ {
+            let diff = self.type_.diff(&updated.type_);
+
+            if !diff.is_empty() && !diff[0].skip() {
+                res.push(Self::Diff::Type(diff[0].clone()));
             }
         }
 
@@ -498,24 +601,24 @@ impl StructDiff for Event {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
 pub struct Define {
     #[serde(flatten)]
-    common: Common,
+    common: BasicMember,
 
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub values: DiffableVec<BasicMember>,
+    pub values: DiffableVec<DefineValue>,
 
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub subkeys: DiffableVec<Define>,
 }
 
 impl Deref for Define {
-    type Target = Common;
+    type Target = BasicMember;
 
     fn deref(&self) -> &Self::Target {
         &self.common
     }
 }
 
-impl diff_helper::Named for Define {
+impl Named for Define {
     fn name(&self) -> &str {
         &self.name
     }
@@ -528,8 +631,12 @@ pub enum DefineDiff {
     Name(String),
     Order(i16),
     Description(String),
+    // basic member fields
+    Lists(Vec<String>),
+    Examples(Vec<String>),
+    Images(Vec<Image>),
     // define fields
-    Values(DiffableVecDiff<BasicMember>),
+    Values(DiffableVecDiff<DefineValue>),
     Subkeys(DiffableVecDiff<Define>),
 }
 
@@ -545,9 +652,12 @@ impl StructDiff for Define {
 
             for d in common_diff {
                 let d = match d {
-                    CommonDiff::Name(name) => Self::Diff::Name(name),
-                    CommonDiff::Order(order) => Self::Diff::Order(order),
-                    CommonDiff::Description(desc) => Self::Diff::Description(desc),
+                    BasicMemberDiff::Name(name) => Self::Diff::Name(name),
+                    BasicMemberDiff::Order(order) => Self::Diff::Order(order),
+                    BasicMemberDiff::Description(desc) => Self::Diff::Description(desc),
+                    BasicMemberDiff::Lists(notes) => Self::Diff::Lists(notes),
+                    BasicMemberDiff::Examples(examples) => Self::Diff::Examples(examples),
+                    BasicMemberDiff::Images(images) => Self::Diff::Images(images),
                 };
                 res.push(d);
             }
@@ -581,159 +691,6 @@ impl StructDiff for Define {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
-pub struct Concept {
-    #[serde(flatten)]
-    common: ExtendedCommon,
-
-    #[serde(rename = "type")]
-    pub type_: Type,
-}
-
-impl Deref for Concept {
-    type Target = ExtendedCommon;
-
-    fn deref(&self) -> &Self::Target {
-        &self.common
-    }
-}
-
-impl diff_helper::Named for Concept {
-    fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum ConceptDiff {
-    // common fields
-    Name(String),
-    Order(i16),
-    Description(String),
-    // extended fields
-    Notes(Vec<String>),
-    Examples(Vec<String>),
-    // concept fields
-    Type(TypeDiff),
-}
-
-impl StructDiff for Concept {
-    type Diff = ConceptDiff;
-    type DiffRef<'target> = ConceptDiff;
-
-    fn diff(&self, updated: &Self) -> Vec<Self::Diff> {
-        let mut res = Vec::new();
-
-        if self.common != updated.common {
-            let common_diff = self.common.diff(&updated.common);
-
-            for d in common_diff {
-                let d = match d {
-                    ExtendedCommonDiff::Name(name) => Self::Diff::Name(name),
-                    ExtendedCommonDiff::Order(order) => Self::Diff::Order(order),
-                    ExtendedCommonDiff::Description(desc) => Self::Diff::Description(desc),
-                    ExtendedCommonDiff::Examples(examples) => Self::Diff::Examples(examples),
-                    ExtendedCommonDiff::Notes(notes) => Self::Diff::Notes(notes),
-                };
-                res.push(d);
-            }
-        }
-
-        if self.type_ != updated.type_ {
-            let diff = self.type_.diff(&updated.type_);
-
-            if !diff.is_empty() && !diff[0].skip() {
-                res.push(Self::Diff::Type(diff[0].clone()));
-            }
-        }
-
-        res
-    }
-
-    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
-        unimplemented!()
-    }
-
-    fn apply_single(&mut self, _diff: Self::Diff) {
-        unimplemented!()
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
-pub struct GlobalObject {
-    #[serde(flatten)]
-    common: Common,
-
-    #[serde(rename = "type")]
-    pub type_: Type,
-}
-
-impl Deref for GlobalObject {
-    type Target = Common;
-
-    fn deref(&self) -> &Self::Target {
-        &self.common
-    }
-}
-
-impl diff_helper::Named for GlobalObject {
-    fn name(&self) -> &str {
-        &self.name
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum GlobalObjectDiff {
-    // common fields
-    Name(String),
-    Order(i16),
-    Description(String),
-    // global object fields
-    Type(TypeDiff),
-}
-
-impl StructDiff for GlobalObject {
-    type Diff = GlobalObjectDiff;
-    type DiffRef<'target> = GlobalObjectDiff;
-
-    fn diff(&self, updated: &Self) -> Vec<Self::Diff> {
-        let mut res = Vec::new();
-
-        if self.common != updated.common {
-            let common_diff = self.common.diff(&updated.common);
-
-            for d in common_diff {
-                let d = match d {
-                    CommonDiff::Name(name) => Self::Diff::Name(name),
-                    CommonDiff::Order(order) => Self::Diff::Order(order),
-                    CommonDiff::Description(desc) => Self::Diff::Description(desc),
-                };
-                res.push(d);
-            }
-        }
-
-        if self.type_ != updated.type_ {
-            let diff = self.type_.diff(&updated.type_);
-
-            if !diff.is_empty() && !diff[0].skip() {
-                res.push(Self::Diff::Type(diff[0].clone()));
-            }
-        }
-
-        res
-    }
-
-    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
-        unimplemented!()
-    }
-
-    fn apply_single(&mut self, _diff: Self::Diff) {
-        unimplemented!()
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Clone, Default, Hash)]
 pub struct EventRaised {
     #[serde(flatten)]
@@ -751,7 +708,7 @@ impl Deref for EventRaised {
     }
 }
 
-impl diff_helper::Named for EventRaised {
+impl Named for EventRaised {
     fn name(&self) -> &str {
         &self.name
     }
@@ -854,7 +811,7 @@ impl Default for Type {
 #[serde(rename_all = "snake_case")]
 pub enum TypeDiff {
     Simple(String),
-    Complex(Vec<<ComplexType as StructDiff>::Diff>),
+    Complex(SingleDiff<ComplexType>),
 }
 
 impl TypeDiff {
@@ -954,14 +911,9 @@ pub enum ComplexType {
         variant_parameter_description: String,
     },
     Tuple {
-        parameters: Vec<Parameter>,
-
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        variant_parameter_groups: Vec<ParameterGroup>,
-
-        #[serde(default, skip_serializing_if = "String::is_empty")]
-        variant_parameter_description: String,
+        values: Vec<Type>,
     },
+    Builtin, // might be an error in the input, should probably be just a simple type string
 
     #[serde(skip)]
     Unknown,
@@ -981,6 +933,7 @@ pub enum ComplexTypeDiff {
     TableTupleParameters(DiffableVecDiff<Parameter>),
     VariantParameterGroups(DiffableVecDiff<ParameterGroup>),
     VariantParameterDescription(String),
+    Values(Vec<TypeDiff>),
     #[serde(rename = "value")]
     Literal(LiteralValue),
 }
@@ -1122,7 +1075,11 @@ impl StructDiff for ComplexType {
                 if attributes != u_attrs {
                     let orig: DiffableVec<Attribute> = attributes.clone().into();
                     let updated: DiffableVec<Attribute> = u_attrs.clone().into();
-                    res.push(Self::Diff::Attributes(orig.diff(&updated)));
+                    let diff = orig.diff(&updated);
+
+                    if !diff.is_empty() {
+                        res.push(Self::Diff::Attributes(diff));
+                    }
                 }
             }
             (
@@ -1136,23 +1093,15 @@ impl StructDiff for ComplexType {
                     variant_parameter_groups: u_vparam_g,
                     variant_parameter_description: u_vparam_desc,
                 },
-            )
-            | (
-                Self::Tuple {
-                    parameters: param,
-                    variant_parameter_groups: vparam_g,
-                    variant_parameter_description: vparam_desc,
-                },
-                Self::Tuple {
-                    parameters: u_param,
-                    variant_parameter_groups: u_vparam_g,
-                    variant_parameter_description: u_vparam_desc,
-                },
             ) => {
                 if param != u_param {
                     let orig: DiffableVec<Parameter> = param.clone().into();
                     let updated: DiffableVec<Parameter> = u_param.clone().into();
-                    res.push(Self::Diff::TableTupleParameters(orig.diff(&updated)));
+                    let diff = orig.diff(&updated);
+
+                    if !diff.is_empty() {
+                        res.push(Self::Diff::TableTupleParameters(diff));
+                    }
                 }
 
                 if vparam_g != u_vparam_g {
@@ -1169,6 +1118,19 @@ impl StructDiff for ComplexType {
                     ));
                 }
             }
+            (Self::Tuple { values }, Self::Tuple { values: u_values }) => {
+                if values != u_values {
+                    res.push(Self::Diff::Values(
+                        vec_diff(values, u_values)
+                            .iter()
+                            .flatten()
+                            .filter(|v| !v.skip())
+                            .cloned()
+                            .collect(),
+                    ));
+                }
+            }
+            (Self::Builtin, Self::Builtin) => {}
             _ => match updated {
                 Self::Type { value, description } => {
                     res.push(Self::Diff::ComplexType("type".to_owned()));
@@ -1261,25 +1223,18 @@ impl StructDiff for ComplexType {
                         ));
                     }
                 }
-                Self::Tuple {
-                    parameters,
-                    variant_parameter_groups,
-                    variant_parameter_description,
-                } => {
+                Self::Tuple { values } => {
                     res.push(Self::Diff::ComplexType("tuple".to_owned()));
 
-                    let params: DiffableVec<Parameter> = parameters.clone().into();
-                    res.push(Self::Diff::TableTupleParameters(params.full()));
-
-                    let groups: DiffableVec<ParameterGroup> =
-                        variant_parameter_groups.clone().into();
-                    res.push(Self::Diff::VariantParameterGroups(groups.full()));
-
-                    if crate::CLI.with_borrow(|c| c.descriptions || c.full) {
-                        res.push(Self::Diff::VariantParameterDescription(
-                            variant_parameter_description.clone(),
-                        ));
-                    }
+                    res.push(Self::Diff::Values(
+                        values
+                            .iter()
+                            .map(|v| Type::default().diff(v)[0].clone())
+                            .collect(),
+                    ));
+                }
+                Self::Builtin => {
+                    res.push(Self::Diff::ComplexType("builtin".to_owned()));
                 }
                 Self::Unknown => {
                     eprintln!("unknown complex type");
@@ -1306,6 +1261,8 @@ pub struct Parameter {
 
     #[serde(rename = "type")]
     pub type_: Type,
+
+    #[serde(default)] // only optional for global_objects
     pub optional: bool,
 }
 
@@ -1317,7 +1274,7 @@ impl Deref for Parameter {
     }
 }
 
-impl diff_helper::Named for Parameter {
+impl Named for Parameter {
     fn name(&self) -> &str {
         &self.name
     }
@@ -1455,7 +1412,7 @@ impl Deref for ParameterGroup {
     }
 }
 
-impl diff_helper::Named for ParameterGroup {
+impl Named for ParameterGroup {
     fn name(&self) -> &str {
         &self.name
     }
@@ -1517,7 +1474,10 @@ impl StructDiff for ParameterGroup {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
 pub struct Method {
     #[serde(flatten)]
-    common: ExtendedCommon,
+    common: BasicMember,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visibility: Vec<String>,
 
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub raises: DiffableVec<EventRaised>,
@@ -1534,28 +1494,22 @@ pub struct Method {
     pub variant_parameter_description: String,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub variadic_type: Option<Type>,
+    pub variadic_parameter: Option<VariadicParameter>,
 
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub variadic_description: String,
-
-    pub takes_table: bool,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub table_is_optional: Option<bool>,
+    pub format: MethodFormat,
 
     pub return_values: Vec<ReturnParameter>,
 }
 
 impl Deref for Method {
-    type Target = ExtendedCommon;
+    type Target = BasicMember;
 
     fn deref(&self) -> &Self::Target {
         &self.common
     }
 }
 
-impl diff_helper::Named for Method {
+impl Named for Method {
     fn name(&self) -> &str {
         &self.name
     }
@@ -1568,19 +1522,19 @@ pub enum MethodDiff {
     Name(String),
     Order(i16),
     Description(String),
-    // extended fields
-    Notes(Vec<String>),
+    // basic member fields
+    Lists(Vec<String>),
     Examples(Vec<String>),
+    Images(Vec<Image>),
     // method fields
+    Visibility(Vec<String>),
     Raises(DiffableVecDiff<EventRaised>),
     Subclasses(Vec<String>),
     Parameters(DiffableVecDiff<Parameter>),
     VariantParameterGroups(DiffableVecDiff<ParameterGroup>),
     VariantParameterDescription(String),
-    VariadicType(Option<TypeDiff>),
-    VariadicDescription(String),
-    TakesTable(bool),
-    TableIsOptional(Option<bool>),
+    VariadicParameter(Option<SingleDiff<VariadicParameter>>),
+    Format(SingleDiff<MethodFormat>),
     ReturnValues(Vec<SingleDiff<ReturnParameter>>),
 }
 
@@ -1596,14 +1550,19 @@ impl StructDiff for Method {
 
             for d in common_diff {
                 let d = match d {
-                    ExtendedCommonDiff::Name(name) => Self::Diff::Name(name),
-                    ExtendedCommonDiff::Order(order) => Self::Diff::Order(order),
-                    ExtendedCommonDiff::Description(desc) => Self::Diff::Description(desc),
-                    ExtendedCommonDiff::Examples(examples) => Self::Diff::Examples(examples),
-                    ExtendedCommonDiff::Notes(notes) => Self::Diff::Notes(notes),
+                    BasicMemberDiff::Name(name) => Self::Diff::Name(name),
+                    BasicMemberDiff::Order(order) => Self::Diff::Order(order),
+                    BasicMemberDiff::Description(desc) => Self::Diff::Description(desc),
+                    BasicMemberDiff::Lists(notes) => Self::Diff::Lists(notes),
+                    BasicMemberDiff::Examples(examples) => Self::Diff::Examples(examples),
+                    BasicMemberDiff::Images(images) => Self::Diff::Images(images),
                 };
                 res.push(d);
             }
+        }
+
+        if self.visibility != updated.visibility {
+            res.push(Self::Diff::Visibility(updated.visibility.clone()));
         }
 
         if self.raises != updated.raises {
@@ -1644,40 +1603,30 @@ impl StructDiff for Method {
             ));
         }
 
-        if self.variadic_type != updated.variadic_type {
-            match (&self.variadic_type, &updated.variadic_type) {
-                (Some(t), Some(u_t)) => {
-                    let diff = t.diff(u_t);
+        if self.variadic_parameter != updated.variadic_parameter {
+            match (&self.variadic_parameter, &updated.variadic_parameter) {
+                (Some(v), Some(u_v)) => {
+                    let diff = v.diff(u_v);
 
-                    if !diff.is_empty() && !diff[0].skip() {
-                        res.push(Self::Diff::VariadicType(Some(diff[0].clone())));
+                    if !diff.is_empty() {
+                        res.push(Self::Diff::VariadicParameter(Some(diff)));
                     }
                 }
-                (None, Some(u_t)) => {
-                    res.push(Self::Diff::VariadicType(Some(
-                        Type::default().diff(u_t)[0].clone(),
-                    )));
-                }
+                (None, Some(u_v)) => res.push(Self::Diff::VariadicParameter(Some(
+                    VariadicParameter::default().diff(u_v),
+                ))),
                 (_, None) => {
-                    res.push(Self::Diff::VariadicType(None));
+                    res.push(Self::Diff::VariadicParameter(None));
                 }
             }
         }
 
-        if self.variadic_description != updated.variadic_description
-            && crate::CLI.with_borrow(|c| c.descriptions || c.full)
-        {
-            res.push(Self::Diff::VariadicDescription(
-                updated.variadic_description.clone(),
-            ));
-        }
+        if self.format != updated.format {
+            let diff = self.format.diff(&updated.format);
 
-        if self.takes_table != updated.takes_table {
-            res.push(Self::Diff::TakesTable(updated.takes_table));
-        }
-
-        if self.table_is_optional != updated.table_is_optional {
-            res.push(Self::Diff::TableIsOptional(updated.table_is_optional));
+            if !diff.is_empty() {
+                res.push(Self::Diff::Format(diff));
+            }
         }
 
         if self.return_values != updated.return_values {
@@ -1699,10 +1648,112 @@ impl StructDiff for Method {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
+pub struct VariadicParameter {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub type_: Option<Type>,
+
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum VariadicParameterDiff {
+    Type(Option<TypeDiff>),
+    Description(String),
+}
+
+impl StructDiff for VariadicParameter {
+    type Diff = VariadicParameterDiff;
+    type DiffRef<'target> = VariadicParameterDiff;
+
+    fn diff(&self, updated: &Self) -> Vec<Self::Diff> {
+        let mut res = Vec::new();
+
+        if self.type_ != updated.type_ {
+            match (&self.type_, &updated.type_) {
+                (Some(t), Some(u_t)) => {
+                    let diff = t.diff(u_t);
+
+                    if !diff.is_empty() && !diff[0].skip() {
+                        res.push(Self::Diff::Type(Some(diff[0].clone())));
+                    }
+                }
+                (None, Some(u_t)) => {
+                    res.push(Self::Diff::Type(Some(Type::default().diff(u_t)[0].clone())));
+                }
+                (_, None) => {
+                    res.push(Self::Diff::Type(None));
+                }
+            }
+        }
+
+        if self.description != updated.description
+            && crate::CLI.with_borrow(|c| c.descriptions || c.full)
+        {
+            res.push(Self::Diff::Description(updated.description.clone()));
+        }
+
+        res
+    }
+
+    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
+        unimplemented!()
+    }
+
+    fn apply_single(&mut self, _diff: Self::Diff) {
+        unimplemented!()
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Default)]
+pub struct MethodFormat {
+    pub takes_table: bool,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub table_optional: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum MethodFormatDiff {
+    TakesTable(bool),
+    TableOptional(Option<bool>),
+}
+
+impl StructDiff for MethodFormat {
+    type Diff = MethodFormatDiff;
+    type DiffRef<'target> = MethodFormatDiff;
+
+    fn diff(&self, updated: &Self) -> Vec<Self::Diff> {
+        let mut res = Vec::new();
+
+        if self.takes_table != updated.takes_table {
+            res.push(Self::Diff::TakesTable(updated.takes_table));
+        }
+
+        if self.table_optional != updated.table_optional {
+            res.push(Self::Diff::TableOptional(updated.table_optional));
+        }
+
+        res
+    }
+
+    fn diff_ref<'target>(&'target self, _updated: &'target Self) -> Vec<Self::DiffRef<'target>> {
+        unimplemented!()
+    }
+
+    fn apply_single(&mut self, _diff: Self::Diff) {
+        unimplemented!()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Clone, Default, Hash)]
 pub struct Attribute {
     #[serde(flatten)]
-    common: ExtendedCommon,
+    common: BasicMember,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub visibility: Vec<String>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub raises: Vec<EventRaised>,
@@ -1719,14 +1770,14 @@ pub struct Attribute {
 }
 
 impl Deref for Attribute {
-    type Target = ExtendedCommon;
+    type Target = BasicMember;
 
     fn deref(&self) -> &Self::Target {
         &self.common
     }
 }
 
-impl diff_helper::Named for Attribute {
+impl Named for Attribute {
     fn name(&self) -> &str {
         &self.name
     }
@@ -1739,10 +1790,12 @@ pub enum AttributeDiff {
     Name(String),
     Order(i16),
     Description(String),
-    // extended fields
-    Notes(Vec<String>),
+    // basic member fields
+    Lists(Vec<String>),
     Examples(Vec<String>),
+    Images(Vec<Image>),
     // attribute fields
+    Visibility(Vec<String>),
     Raises(DiffableVecDiff<EventRaised>),
     Subclasses(Vec<String>),
     Type(TypeDiff),
@@ -1763,14 +1816,19 @@ impl StructDiff for Attribute {
 
             for d in common_diff {
                 let d = match d {
-                    ExtendedCommonDiff::Name(name) => Self::Diff::Name(name),
-                    ExtendedCommonDiff::Order(order) => Self::Diff::Order(order),
-                    ExtendedCommonDiff::Description(desc) => Self::Diff::Description(desc),
-                    ExtendedCommonDiff::Examples(examples) => Self::Diff::Examples(examples),
-                    ExtendedCommonDiff::Notes(notes) => Self::Diff::Notes(notes),
+                    BasicMemberDiff::Name(name) => Self::Diff::Name(name),
+                    BasicMemberDiff::Order(order) => Self::Diff::Order(order),
+                    BasicMemberDiff::Description(desc) => Self::Diff::Description(desc),
+                    BasicMemberDiff::Lists(notes) => Self::Diff::Lists(notes),
+                    BasicMemberDiff::Examples(examples) => Self::Diff::Examples(examples),
+                    BasicMemberDiff::Images(images) => Self::Diff::Images(images),
                 };
                 res.push(d);
             }
+        }
+
+        if self.visibility != updated.visibility {
+            res.push(Self::Diff::Visibility(updated.visibility.clone()));
         }
 
         if self.raises != updated.raises {
