@@ -6,4 +6,4 @@ _limited to doc format version 4/5_
 
 ## TODO
 
-- add support for the runtime docs
+- update to runtime version 5 (currently only 4)

@@ -1,140 +1,66 @@
-use std::{collections::HashMap, io::Read, ops::Deref};
+use std::{collections::HashMap, ops::Deref};
 
 use serde::{de::Visitor, Deserialize, Serialize};
 use structdiff::{Difference, StructDiff};
 
-mod proto_serde {
-    use std::collections::HashMap;
+use super::diff_helper::{self, vec_diff, DiffableVec, DiffableVecDiff, SingleDiff};
 
-    use serde::{Deserialize, Serialize};
-    use structdiff::StructDiff;
-
-    pub(super) trait Named {
-        fn name(&self) -> &str;
-    }
-
-    impl<T> Named for T
-    where
-        T: std::ops::Deref<Target = super::NamedCommon>,
-    {
-        fn name(&self) -> &str {
-            &self.name
-        }
-    }
-
-    #[derive(Debug, PartialEq, Eq, Clone, Default)]
-    pub struct DiffableMap<K: std::hash::Hash + Eq, V> {
-        map: HashMap<K, V>,
-    }
-
-    impl<K, V> std::ops::Deref for DiffableMap<K, V>
-    where
-        K: std::hash::Hash + Eq,
-    {
-        type Target = HashMap<K, V>;
-
-        fn deref(&self) -> &Self::Target {
-            &self.map
-        }
-    }
-
-    impl<K, V> DiffableMap<K, V>
-    where
-        K: std::hash::Hash + Eq + Clone,
-        V: StructDiff + Default,
-    {
-        #[must_use]
-        pub fn diff(&self, other: &Self) -> HashMap<K, Vec<<V as StructDiff>::Diff>> {
-            let mut diff = HashMap::new();
-
-            for (k, v) in &self.map {
-                if let Some(o) = other.map.get(k) {
-                    let d = v.diff(o);
-                    if !d.is_empty() {
-                        diff.insert(k.clone(), d);
-                    }
-                } else {
-                    diff.insert(k.clone(), v.diff(&V::default()));
-                }
-            }
-
-            for (k, v) in &other.map {
-                if !self.map.contains_key(k) {
-                    diff.insert(k.clone(), V::default().diff(v));
-                }
-            }
-
-            diff
-        }
-    }
-
-    impl<K, V> serde::Serialize for DiffableMap<K, V>
-    where
-        K: std::hash::Hash + Eq,
-        V: Serialize,
-    {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            let value = self.values().collect::<Vec<_>>();
-            value.serialize(serializer)
-        }
-    }
-
-    impl<'de, V> serde::Deserialize<'de> for DiffableMap<String, V>
-    where
-        V: Deserialize<'de> + Named,
-    {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            let value = Vec::<V>::deserialize(deserializer)?;
-            Ok(Self {
-                map: value
-                    .into_iter()
-                    .map(|p| (p.name().to_owned(), p))
-                    .collect(),
-            })
-        }
+impl<T> diff_helper::Named for T
+where
+    T: Deref<Target = NamedCommon>,
+{
+    fn name(&self) -> &str {
+        &self.name
     }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone)]
 pub struct PrototypeDoc {
     #[serde(flatten)]
-    pub common: super::Common,
+    common: super::Common,
 
-    pub prototypes: proto_serde::DiffableMap<String, Prototype>,
-    pub types: proto_serde::DiffableMap<String, TypeConcept>,
+    pub prototypes: DiffableVec<Prototype>,
+    pub types: DiffableVec<TypeConcept>,
+}
+
+impl Deref for PrototypeDoc {
+    type Target = super::Common;
+
+    fn deref(&self) -> &Self::Target {
+        &self.common
+    }
+}
+
+impl super::Doc for PrototypeDoc {
+    type Diff = PrototypeDocDiff;
+
+    fn diff(&self, other: &Self) -> Self::Diff {
+        Self::Diff {
+            prototypes: self.prototypes.diff(&other.prototypes),
+            types: self.types.diff(&other.types),
+        }
+    }
+}
+
+impl super::Info for PrototypeDoc {
+    fn print_info(&self) {
+        self.common.print_info();
+
+        eprintln!(" - Prototypes: {}", self.prototypes.len());
+        eprintln!(" - Types:      {}", self.types.len());
+    }
 }
 
 #[derive(Serialize)]
 pub struct PrototypeDocDiff {
-    pub prototypes: HashMap<String, Vec<PrototypeDiff>>,
-    pub types: HashMap<String, Vec<TypeConceptDiff>>,
+    pub prototypes: DiffableVecDiff<Prototype>,
+    pub types: DiffableVecDiff<TypeConcept>,
 }
 
-impl PrototypeDoc {
-    pub fn fetch(version: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let data = crate::Docs::Prototypes.get(version)?;
-        Ok(serde_json::from_slice(&data)?)
-    }
-
-    pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut bytes = Vec::new();
-        std::fs::File::open(path)?.read_to_end(&mut bytes)?;
-        let doc = serde_json::from_slice(&bytes)?;
-        Ok(doc)
-    }
-
-    #[must_use]
-    pub fn diff(&self, other: &Self) -> PrototypeDocDiff {
-        PrototypeDocDiff {
-            prototypes: self.prototypes.diff(&other.prototypes),
-            types: self.types.diff(&other.types),
-        }
+impl super::Info for PrototypeDocDiff {
+    fn print_info(&self) {
+        eprintln!("=> {} prototypes changed", self.prototypes.len());
+        eprintln!("=> {} types changed", self.types.len());
     }
 }
 
@@ -207,6 +133,12 @@ pub struct NamedCommon {
     pub order: i16,
 }
 
+impl diff_helper::Named for NamedCommon {
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum NamedCommonDiff {
@@ -238,16 +170,14 @@ impl StructDiff for NamedCommon {
         if self.common != updated.common {
             let common_diff = self.common.diff(&updated.common);
 
-            if !common_diff.is_empty() {
-                for d in common_diff {
-                    let d = match d {
-                        CommonDiff::Description(desc) => Self::Diff::Description(desc),
-                        CommonDiff::Lists(lists) => Self::Diff::Lists(lists),
-                        CommonDiff::Examples(examples) => Self::Diff::Examples(examples),
-                        CommonDiff::Images(images) => Self::Diff::Images(images),
-                    };
-                    res.push(d);
-                }
+            for d in common_diff {
+                let d = match d {
+                    CommonDiff::Description(desc) => Self::Diff::Description(desc),
+                    CommonDiff::Lists(lists) => Self::Diff::Lists(lists),
+                    CommonDiff::Examples(examples) => Self::Diff::Examples(examples),
+                    CommonDiff::Images(images) => Self::Diff::Images(images),
+                };
+                res.push(d);
             }
         }
 
@@ -299,7 +229,7 @@ pub struct Prototype {
 
     pub deprecated: bool,
 
-    pub properties: proto_serde::DiffableMap<String, Property>,
+    pub properties: DiffableVec<Property>,
 
     pub custom_properties: Option<CustomProperties>,
 }
@@ -321,8 +251,8 @@ pub enum PrototypeDiff {
     Typename(String),
     InstanceLimit(String),
     Deprecated(bool),
-    Properties(HashMap<String, Vec<<Property as StructDiff>::Diff>>),
-    CustomProperties(Vec<<CustomProperties as StructDiff>::Diff>),
+    Properties(DiffableVecDiff<Property>),
+    CustomProperties(SingleDiff<CustomProperties>),
 }
 
 impl StructDiff for Prototype {
@@ -469,7 +399,7 @@ pub struct TypeConcept {
     pub type_: Type,
 
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub properties: proto_serde::DiffableMap<String, Property>,
+    pub properties: DiffableVec<Property>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -487,7 +417,7 @@ pub enum TypeConceptDiff {
     Abstract(bool),
     Inline(bool),
     Type(<Type as StructDiff>::Diff),
-    Properties(HashMap<String, Vec<<Property as StructDiff>::Diff>>),
+    Properties(DiffableVecDiff<Property>),
 }
 
 impl StructDiff for TypeConcept {
@@ -804,10 +734,10 @@ impl Default for Type {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(untagged)]
+#[serde(untagged, rename_all = "snake_case")]
 pub enum TypeDiff {
     Simple(String),
-    Complex(Vec<<ComplexType as StructDiff>::Diff>),
+    Complex(SingleDiff<ComplexType>),
 }
 
 impl TypeDiff {
@@ -972,16 +902,11 @@ impl StructDiff for ComplexType {
         let mut res = Vec::new();
 
         match (self, updated) {
-            (
-                Self::Array { value },
-                Self::Array {
-                    value: updated_value,
-                },
-            ) => {
-                let diff = value.diff(updated_value);
-                if !diff.is_empty() {
-                    assert!(diff.len() == 1, "type diff should have only one element");
-                    if !diff[0].skip() {
+            (Self::Array { value }, Self::Array { value: u_value }) => {
+                if value != u_value {
+                    let diff = value.diff(u_value);
+
+                    if !diff.is_empty() && !diff[0].skip() {
                         res.push(Self::Diff::Value(diff[0].clone()));
                     }
                 }
@@ -989,51 +914,34 @@ impl StructDiff for ComplexType {
             (
                 Self::Dictionary { key, value },
                 Self::Dictionary {
-                    key: updated_key,
-                    value: updated_value,
+                    key: u_key,
+                    value: u_value,
                 },
             ) => {
-                let key_diff = key.diff(updated_key);
-                let value_diff = value.diff(updated_value);
+                if key != u_key {
+                    let diff = key.diff(u_key);
 
-                if !key_diff.is_empty() {
-                    assert!(
-                        key_diff.len() == 1,
-                        "type diff should have only one element"
-                    );
-                    res.push(Self::Diff::Key(key_diff[0].clone()));
+                    if !diff.is_empty() && !diff[0].skip() {
+                        res.push(Self::Diff::Key(diff[0].clone()));
+                    }
                 }
 
-                if !value_diff.is_empty() {
-                    assert!(
-                        value_diff.len() == 1,
-                        "type diff should have only one element"
-                    );
-                    res.push(Self::Diff::Value(value_diff[0].clone()));
+                if value != u_value {
+                    let diff = value.diff(u_value);
+
+                    if !diff.is_empty() && !diff[0].skip() {
+                        res.push(Self::Diff::Value(diff[0].clone()));
+                    }
                 }
             }
-            (
-                Self::Tuple { values },
-                Self::Tuple {
-                    values: updated_values,
-                },
-            ) => {
-                if values != updated_values {
-                    let mut diff = Vec::new();
-
-                    for (v, uv) in values.iter().zip(updated_values) {
-                        let d = v.diff(uv);
-                        if !d.is_empty() {
-                            assert!(d.len() == 1, "type diff should have only one element");
-                            diff.push(d[0].clone());
-                        }
-                    }
-
-                    if values.len() < updated_values.len() {
-                        for uv in updated_values.iter().skip(values.len()) {
-                            diff.push(Type::default().diff(uv)[0].clone());
-                        }
-                    }
+            (Self::Tuple { values }, Self::Tuple { values: u_values }) => {
+                if values != u_values {
+                    let diff = vec_diff(values, u_values)
+                        .iter()
+                        .flatten()
+                        .filter(|v| !v.skip())
+                        .cloned()
+                        .collect::<Vec<_>>();
 
                     if !diff.is_empty() {
                         res.push(Self::Diff::Values(diff));
@@ -1046,50 +954,39 @@ impl StructDiff for ComplexType {
                     full_format,
                 },
                 Self::Union {
-                    options: updated_options,
-                    full_format: updated_full_format,
+                    options: u_options,
+                    full_format: u_full_format,
                 },
             ) => {
-                if options != updated_options {
-                    let mut diff = Vec::new();
-
-                    for (o, uo) in options.iter().zip(updated_options) {
-                        let d = o.diff(uo);
-                        if !d.is_empty() {
-                            assert!(d.len() == 1, "type diff should have only one element");
-                            diff.push(d[0].clone());
-                        }
-                    }
-
-                    if options.len() < updated_options.len() {
-                        for uo in updated_options.iter().skip(options.len()) {
-                            diff.push(Type::default().diff(uo)[0].clone());
-                        }
-                    }
+                if options != u_options {
+                    let diff = vec_diff(options, u_options)
+                        .iter()
+                        .flatten()
+                        .filter(|o| !o.skip())
+                        .cloned()
+                        .collect::<Vec<_>>();
 
                     if !diff.is_empty() {
                         res.push(Self::Diff::Options(diff));
                     }
                 }
 
-                if full_format != updated_full_format {
-                    res.push(Self::Diff::FullFormat(*updated_full_format));
+                if full_format != u_full_format {
+                    res.push(Self::Diff::FullFormat(*u_full_format));
                 }
             }
             (
                 Self::Type { value, description },
                 Self::Type {
-                    value: updated_value,
+                    value: u_value,
                     description: updated_description,
                 },
             ) => {
-                if value != updated_value {
-                    let diff = value.diff(updated_value);
-                    if !diff.is_empty() {
-                        assert!(diff.len() == 1, "type diff should have only one element");
-                        if !diff[0].skip() {
-                            res.push(Self::Diff::Value(diff[0].clone()));
-                        }
+                if value != u_value {
+                    let diff = value.diff(u_value);
+
+                    if !diff.is_empty() && !diff[0].skip() {
+                        res.push(Self::Diff::Value(diff[0].clone()));
                     }
                 }
 
@@ -1196,7 +1093,7 @@ pub struct Literal {
     pub description: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum LiteralDiff {
     Value(LiteralValue),
