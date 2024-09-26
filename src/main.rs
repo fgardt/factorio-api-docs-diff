@@ -1,11 +1,4 @@
-// #![allow(
-// //     dead_code,
-// //     clippy::upper_case_acronyms,
-// //     unused_variables,
-// //     clippy::unwrap_used
-// )]
-
-use std::{cell::RefCell, process::ExitCode};
+use std::{cell::RefCell, path::Path, process::ExitCode};
 
 use anyhow::Result;
 
@@ -16,6 +9,7 @@ pub mod format;
 
 use crate::format::prototype::PrototypeDoc;
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Parser, Clone)]
 #[clap(author = crate_authors!(), version, about = crate_description!())]
 pub struct Cli {
@@ -46,6 +40,10 @@ pub struct Cli {
     /// Full diff (descriptions, examples, ordering, images, lists)
     #[clap(short, long, action)]
     pub full: bool,
+
+    /// Read source and target from local files
+    #[clap(short, long, action)]
+    pub local: bool,
 }
 
 thread_local! {static CLI: RefCell<Cli> = RefCell::new(Cli::parse());}
@@ -99,10 +97,22 @@ impl Docs {
         Ok((*res).into())
     }
 
+    fn get_local(self, path: &Path) -> Result<Box<[u8]>> {
+        let res = std::fs::read(path.join(format!("doc-html/{self}-api.json")))?;
+
+        Ok(res.into())
+    }
+
     #[allow(clippy::too_many_lines)]
     pub fn compare(self, source: &str, target: &str) -> Result<()> {
-        let source = self.get(source)?;
-        let target = self.get(target)?;
+        let (source, target) = if CLI.with_borrow(|c| c.local) {
+            (
+                self.get_local(Path::new(&source))?,
+                self.get_local(Path::new(&target))?,
+            )
+        } else {
+            (self.get(source)?, self.get(target)?)
+        };
 
         let source_info = match serde_json::from_slice::<format::Common>(&source) {
             Ok(s) => s,
@@ -194,7 +204,7 @@ impl Docs {
                     Err(e) => {
                         anyhow::bail!(
                             "Failed to deserialize source: {e}\n{}",
-                            std::str::from_utf8(&source).unwrap()
+                            std::str::from_utf8(&source).unwrap_or("[invalid utf-8]")
                         );
                     }
                 };
