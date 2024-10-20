@@ -1761,12 +1761,21 @@ pub struct Attribute {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subclasses: Vec<String>,
 
-    #[serde(rename = "type")]
-    pub type_: Type,
+    // v5 fields
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub type_: Option<Type>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub write: Option<bool>,
+
+    // v6 fields
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_type: Option<Type>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub write_type: Option<Type>,
 
     pub optional: bool,
-    pub read: bool,
-    pub write: bool,
 }
 
 impl Deref for Attribute {
@@ -1798,16 +1807,21 @@ pub enum AttributeDiff {
     Visibility(Vec<String>),
     Raises(DiffableVecDiff<EventRaised>),
     Subclasses(Vec<String>),
-    Type(TypeDiff),
     Optional(bool),
+    // v5 fields
+    Type(TypeDiff),
     Read(bool),
     Write(bool),
+    // v6 fields
+    ReadType(Option<TypeDiff>),
+    WriteType(Option<TypeDiff>),
 }
 
 impl StructDiff for Attribute {
     type Diff = AttributeDiff;
     type DiffRef<'target> = AttributeDiff;
 
+    #[allow(clippy::too_many_lines, clippy::cognitive_complexity)]
     fn diff(&self, updated: &Self) -> Vec<Self::Diff> {
         let mut res = Vec::new();
 
@@ -1845,24 +1859,112 @@ impl StructDiff for Attribute {
             res.push(Self::Diff::Subclasses(updated.subclasses.clone()));
         }
 
-        if self.type_ != updated.type_ {
-            let diff = self.type_.diff(&updated.type_);
-
-            if !diff.is_empty() && !diff[0].skip() {
-                res.push(Self::Diff::Type(diff[0].clone()));
-            }
-        }
-
         if self.optional != updated.optional {
             res.push(Self::Diff::Optional(updated.optional));
         }
 
-        if self.read != updated.read {
-            res.push(Self::Diff::Read(updated.read));
-        }
+        let src_ver = crate::SRC_INF.with_borrow(|s| s.api_version);
+        let trgt_ver = crate::TRGT_INF.with_borrow(|t| t.api_version);
 
-        if self.write != updated.write {
-            res.push(Self::Diff::Write(updated.write));
+        match (src_ver, trgt_ver) {
+            (5, 5) => {
+                if self.type_ != updated.type_ {
+                    if let (Some(src_t), Some(trgt_t)) = (&self.type_, &updated.type_) {
+                        let diff = src_t.diff(trgt_t);
+
+                        if !diff.is_empty() && !diff[0].skip() {
+                            res.push(Self::Diff::Type(diff[0].clone()));
+                        }
+                    }
+                }
+
+                if self.read != updated.read {
+                    if let Some(trgt_read) = updated.read {
+                        res.push(Self::Diff::Read(trgt_read));
+                    }
+                }
+
+                if self.write != updated.write {
+                    if let Some(trgt_write) = updated.write {
+                        res.push(Self::Diff::Write(trgt_write));
+                    }
+                }
+            }
+            (5, 6) => {
+                let src_r = self.read.unwrap_or_default();
+                let src_w = self.write.unwrap_or_default();
+                let src_t = self.type_.clone().unwrap_or_default();
+
+                match (src_r, &updated.read_type) {
+                    (true, None) => {
+                        res.push(Self::Diff::ReadType(None));
+                    }
+                    (false, Some(trgt_rt)) => {
+                        let diff = Type::default().diff(trgt_rt);
+
+                        if !diff.is_empty() && !diff[0].skip() {
+                            res.push(Self::Diff::ReadType(Some(diff[0].clone())));
+                        }
+                    }
+                    (true, Some(trgt_rt)) => {
+                        let diff = src_t.diff(trgt_rt);
+
+                        if !diff.is_empty() && !diff[0].skip() {
+                            res.push(Self::Diff::ReadType(Some(diff[0].clone())));
+                        }
+                    }
+                    _ => {}
+                }
+
+                match (src_w, &updated.write_type) {
+                    (true, None) => {
+                        res.push(Self::Diff::WriteType(None));
+                    }
+                    (false, Some(trgt_wt)) => {
+                        let diff = Type::default().diff(trgt_wt);
+
+                        if !diff.is_empty() && !diff[0].skip() {
+                            res.push(Self::Diff::WriteType(Some(diff[0].clone())));
+                        }
+                    }
+                    (true, Some(trgt_wt)) => {
+                        let diff = src_t.diff(trgt_wt);
+
+                        if !diff.is_empty() && !diff[0].skip() {
+                            res.push(Self::Diff::WriteType(Some(diff[0].clone())));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            (6, 6) => {
+                if self.read_type != updated.read_type {
+                    if let Some(trgt_rt) = &updated.read_type {
+                        let diff = self.read_type.clone().unwrap_or_default().diff(trgt_rt);
+
+                        if !diff.is_empty() && !diff[0].skip() {
+                            res.push(Self::Diff::ReadType(Some(diff[0].clone())));
+                        }
+                    } else {
+                        res.push(Self::Diff::ReadType(None));
+                    };
+                }
+
+                if self.write_type != updated.write_type {
+                    if let Some(trgt_wt) = &updated.write_type {
+                        let diff = self.write_type.clone().unwrap_or_default().diff(trgt_wt);
+
+                        if !diff.is_empty() && !diff[0].skip() {
+                            res.push(Self::Diff::WriteType(Some(diff[0].clone())));
+                        }
+                    } else {
+                        res.push(Self::Diff::WriteType(None));
+                    };
+                }
+            }
+            (_, _) => {
+                eprintln!("unsupported src / target versions: {src_ver} / {trgt_ver}");
+            }
         }
 
         res

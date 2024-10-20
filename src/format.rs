@@ -146,20 +146,22 @@ pub trait Info {
     fn print_info(&self);
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Difference, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Difference, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum Application {
+    #[default]
     Factorio,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Difference, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Difference, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum Stage {
+    #[default]
     Prototype,
     Runtime,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Difference, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Difference, Clone)]
 pub struct Common {
     pub application: Application,
     pub stage: Stage,

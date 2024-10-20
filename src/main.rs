@@ -47,6 +47,8 @@ pub struct Cli {
 }
 
 thread_local! {static CLI: RefCell<Cli> = RefCell::new(Cli::parse());}
+thread_local! {static SRC_INF: RefCell<format::Common> = RefCell::default();}
+thread_local! {static TRGT_INF: RefCell<format::Common> = RefCell::default();}
 
 fn main() -> ExitCode {
     let cli = CLI.with_borrow(std::clone::Clone::clone);
@@ -121,12 +123,16 @@ impl Docs {
             }
         };
 
+        SRC_INF.replace(source_info.clone());
+
         let target_info = match serde_json::from_slice::<format::Common>(&target) {
             Ok(s) => s,
             Err(e) => {
                 anyhow::bail!("Failed to get common info header from target: {e}");
             }
         };
+
+        TRGT_INF.replace(target_info.clone());
 
         let (d, s, t): (
             Box<dyn format::Info>,
@@ -136,25 +142,25 @@ impl Docs {
             Self::Prototype => {
                 if source_info.api_version < 4 {
                     anyhow::bail!(
-                        "Source api format is too old! Only api version 4 and 5 are supported"
+                        "Source api format is too old! Only api version 4, 5 and 6 are supported"
                     );
                 }
 
                 if target_info.api_version < 4 {
                     anyhow::bail!(
-                        "Target api format is too old! Only api version 4 and 5 are supported"
+                        "Target api format is too old! Only api version 4, 5 and 6 are supported"
                     );
                 }
 
-                if source_info.api_version > 5 {
+                if source_info.api_version > 6 {
                     anyhow::bail!(
-                        "Source api format is too new! Only api version 4 and 5 are supported"
+                        "Source api format is too new! Only api version 4, 5 and 6 are supported"
                     );
                 }
 
-                if target_info.api_version > 5 {
+                if target_info.api_version > 6 {
                     anyhow::bail!(
-                        "Target api format is too new! Only api version 4 and 5 are supported"
+                        "Target api format is too new! Only api version 4, 5 and 6 are supported"
                     );
                 }
 
@@ -184,19 +190,31 @@ impl Docs {
             }
             Self::Runtime => {
                 if source_info.api_version < 5 {
-                    anyhow::bail!("Source api format is too old! Only api version 5 is supported");
+                    anyhow::bail!(
+                        "Source api format is too old! Only api version 5 and 6 are supported"
+                    );
                 }
 
                 if target_info.api_version < 5 {
-                    anyhow::bail!("Target api format is too old! Only api version 5 is supported");
+                    anyhow::bail!(
+                        "Target api format is too old! Only api version 5 and 6 are supported"
+                    );
                 }
 
-                if source_info.api_version > 5 {
-                    anyhow::bail!("Source api format is too new! Only api version 5 is supported");
+                if source_info.api_version > 6 {
+                    anyhow::bail!(
+                        "Source api format is too new! Only api version 5 and 6 are supported"
+                    );
                 }
 
-                if target_info.api_version > 5 {
-                    anyhow::bail!("Target api format is too new! Only api version 5 is supported");
+                if target_info.api_version > 6 {
+                    anyhow::bail!(
+                        "Target api format is too new! Only api version 5 and 6 are supported"
+                    );
+                }
+
+                if source_info.api_version > target_info.api_version {
+                    anyhow::bail!("Source api format is newer than target api format");
                 }
 
                 let source: RuntimeDoc = match serde_json::from_slice(&source) {

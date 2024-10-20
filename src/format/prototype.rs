@@ -22,8 +22,14 @@ pub struct PrototypeDoc {
     #[serde(flatten)]
     common: super::Common,
 
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub prototypes: DiffableVec<Prototype>,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub types: DiffableVec<TypeConcept>,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub defines: DiffableVec<crate::format::runtime::Define>,
 }
 
 impl Deref for PrototypeDoc {
@@ -41,6 +47,7 @@ impl super::Doc for PrototypeDoc {
         Self::Diff {
             prototypes: self.prototypes.diff(&other.prototypes),
             types: self.types.diff(&other.types),
+            defines: self.defines.diff(&other.defines),
         }
     }
 }
@@ -51,6 +58,7 @@ impl super::Info for PrototypeDoc {
 
         eprintln!(" - Prototypes: {}", self.prototypes.len());
         eprintln!(" - Types:      {}", self.types.len());
+        eprintln!(" - Defines:    {}", self.defines.len());
     }
 }
 
@@ -58,12 +66,14 @@ impl super::Info for PrototypeDoc {
 pub struct PrototypeDocDiff {
     pub prototypes: DiffableVecDiff<Prototype>,
     pub types: DiffableVecDiff<TypeConcept>,
+    pub defines: DiffableVecDiff<crate::format::runtime::Define>,
 }
 
 impl super::Info for PrototypeDocDiff {
     fn print_info(&self) {
         eprintln!("=> {} prototypes changed", self.prototypes.len());
         eprintln!("=> {} types changed", self.types.len());
+        eprintln!("=> {} defines changed", self.defines.len());
     }
 }
 
