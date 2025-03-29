@@ -15,8 +15,8 @@ use crate::format::prototype::PrototypeDoc;
 pub struct Cli {
     /// Stage of the docs to use.
     ///
-    /// Prototype stage supports format versions 4 and 5.
-    /// Runtime stage supports format version 5 only.
+    /// Prototype stage supports format versions 4, 5 and 6.
+    /// Runtime stage supports format version 5 and 6.
     #[clap(value_parser, verbatim_doc_comment)]
     pub stage: Docs,
 
