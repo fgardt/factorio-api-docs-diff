@@ -1,11 +1,17 @@
 #![allow(unreachable_patterns)] // ComplexTypeDiff::Literal triggers this
 
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "diff")]
 use structdiff::{Difference, StructDiff};
 
 pub mod prototype;
 pub mod runtime;
 
+#[cfg(not(feature = "diff"))]
+type FakeDiffableVec<T> = Vec<T>;
+
+#[cfg(feature = "diff")]
 mod diff_helper {
     use std::collections::HashMap;
 
@@ -137,6 +143,7 @@ mod diff_helper {
     }
 }
 
+#[cfg(feature = "diff")]
 pub trait Doc {
     type Diff;
 
@@ -148,14 +155,16 @@ pub trait Info {
     fn print_info(&self);
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Difference, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Clone)]
+#[cfg_attr(feature = "diff", derive(Difference))]
 #[serde(rename_all = "lowercase")]
 pub enum Application {
     #[default]
     Factorio,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Difference, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Clone)]
+#[cfg_attr(feature = "diff", derive(Difference))]
 #[serde(rename_all = "lowercase")]
 pub enum Stage {
     #[default]
@@ -163,7 +172,8 @@ pub enum Stage {
     Runtime,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Difference, Clone)]
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Clone)]
+#[cfg_attr(feature = "diff", derive(Difference))]
 pub struct Common {
     pub application: Application,
     pub stage: Stage,
@@ -180,9 +190,9 @@ impl Info for Common {
     }
 }
 
-#[derive(
-    Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Difference, Clone, Default, Hash,
-)]
+#[cfg(feature = "non_type_info")]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Clone, Default, Hash)]
+#[cfg_attr(feature = "diff", derive(Difference))]
 pub struct Image {
     pub filename: String,
     pub caption: Option<String>,
