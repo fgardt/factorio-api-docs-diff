@@ -1,13 +1,10 @@
 use std::{cell::RefCell, path::Path, process::ExitCode};
 
 use anyhow::Result;
-
 use clap::{crate_authors, crate_description, Parser};
-use format::{runtime::RuntimeDoc, Doc as _};
 
 pub mod format;
-
-use crate::format::prototype::PrototypeDoc;
+use format::{prototype::PrototypeDoc, runtime::RuntimeDoc, Doc as _};
 
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Parser, Clone)]
