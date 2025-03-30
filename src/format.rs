@@ -1,3 +1,5 @@
+#![allow(unreachable_patterns)] // ComplexTypeDiff::Literal triggers this
+
 use serde::{Deserialize, Serialize};
 use structdiff::{Difference, StructDiff};
 

@@ -321,6 +321,7 @@ impl StructDiff for Prototype {
             res.push(PrototypeDiff::Properties(properties_diff));
         }
 
+        #[allow(clippy::or_fun_call)]
         if self.custom_properties != updated.custom_properties {
             res.push(PrototypeDiff::CustomProperties(
                 updated
@@ -351,7 +352,7 @@ impl StructDiff for Prototype {
 
 struct InstanceLimitVisitor;
 
-impl<'de> Visitor<'de> for InstanceLimitVisitor {
+impl Visitor<'_> for InstanceLimitVisitor {
     type Value = String;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
